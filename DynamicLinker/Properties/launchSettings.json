@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "DynamicLinker": {
+      "commandName": "Project",
+      "workingDirectory": "C:\\Users\\rydev\\Documents\\GitHub\\DynamicLinker\\DynamicLinker\\bin\\Release\\net8.0"
+    }
+  }
+}
