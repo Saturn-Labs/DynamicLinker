@@ -13,7 +13,7 @@ namespace DynamicLinker.Models {
         public string Architecture { get; set; } = "amd64";
         [JsonProperty("symbol")]
         public string Symbol { get; set; } = "";
-        [JsonProperty("pointers")]
-        public DynamicSymbolPointerModel[] Pointers { get; set; } = [];
+        [JsonProperty("pointer")]
+        public DynamicSymbolPointerModel? Pointer { get; set; }
     }
 }
