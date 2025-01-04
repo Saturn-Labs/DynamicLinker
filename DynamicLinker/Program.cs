@@ -3,22 +3,27 @@ using AsmResolver.IO;
 using AsmResolver.PE.File;
 using AsmResolver.PE.File.Headers;
 using DynamicLinker.Common;
+using DynamicLinker.Descriptors;
 using DynamicLinker.Models;
 using DynamicLinker.Utils;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Reflection.PortableExecutable;
 
-namespace DynamicLinker
-{
-    public class Program
-    {
+namespace DynamicLinker {
+    public class Program {
         #region Statics and Constants
         public const string CreatedBy = "rydev";
         public const string License = "GPLv3";
-        public const string ImportDescriptorSection = ".idtnw";
-        public const string DynamicLinkSection = ".dlink";
-        public const string DllMainRedirectSection = ".dlmre";
+
+        public const string ImportDescriptorSection = ".idnew";
+        public const string DynamicImportDescriptorSection = ".didata";
+        public const string EntryRedirectSection = ".entnew";
+        public const string DynamicLinkDescriptorSection = ".dlnkdt";
+        public const string SymbolDescriptorSection = ".symsdt";
+        public const string SymbolNameTableSection = ".symsnt";
+        public const string SymbolPointerSignatureTableSection = ".sympst";
+
         public readonly static byte[] RedirectionBytes64 = [
             0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00,   // mov rax, 1
             0xC3                                        // ret
@@ -51,8 +56,7 @@ namespace DynamicLinker
             Log.Trace("Generating export definition...");
             Log.Trace($"{model.Target}:");
             foreach (var symbol in model.Symbols) {
-                var arch = ArchitectureUtils.IsTechnicalName(symbol.Architecture) ? ArchitectureUtils.ConvertToFriendlyNameArch(symbol.Architecture) : symbol.Architecture;
-                if (arch != targetArch || symbol.Version == "ignore" || !Semver.IsValidVersion(symbol.Version) || new Semver(symbol.Version) != targetVersion)
+                if (symbol.Architecture != targetArch || symbol.Version == "ignore" || !Semver.IsValidVersion(symbol.Version) || new Semver(symbol.Version) != targetVersion)
                     continue;
                 Log.Trace($"  {symbol.Symbol}");
                 def += $"    {symbol.Symbol}\n";
@@ -64,22 +68,64 @@ namespace DynamicLinker
         }
 
         private async Task<string?> GenerateLinkLibrary(string defFilePath, string arch = "x64") {
-            if (VC.GetToolsPath(arch) == null || string.IsNullOrEmpty(defFilePath) || !File.Exists(defFilePath))
+            if (VC.GetToolsPath(arch) is not string vcToolsPath || string.IsNullOrEmpty(defFilePath) || !File.Exists(defFilePath))
                 return null;
-
-            if (ArchitectureUtils.IsTechnicalName(arch)) {
-                arch = ArchitectureUtils.ConvertToFriendlyNameArch(arch);
-            }
+            Log.Trace("Visual C++ tools path: " + vcToolsPath);
 
             string libFilePath = Path.ChangeExtension(defFilePath, ".lib");
             string arguments = $"/def:\"{defFilePath}\" /machine:{arch} /out:\"{libFilePath}\"";
-            bool success = await VC.LibAsync(arguments);
+            bool success = await VC.LibAsync(arguments, arch);
             return success ? libFilePath : null;
+        }
+
+        private void RemoveAllSections(PEFile portableExecutable) {
+            if (portableExecutable.Sections.Any(x => x.Name == EntryRedirectSection)) {
+                Log.Trace("Removing the Entry Point redirection...");
+                var entryRedirectSection = portableExecutable.Sections.First(x => x.Name == EntryRedirectSection);
+                var reader = portableExecutable.CreateReaderAtRva(entryRedirectSection.Rva);
+                if (reader.ReadUInt32() == 1) {
+                    portableExecutable.OptionalHeader.AddressOfEntryPoint = reader.ReadUInt32();
+                    portableExecutable.Sections.Remove(entryRedirectSection);
+                }
+            }
+            if (portableExecutable.Sections.Any(x => x.Name == ImportDescriptorSection)) {
+                Log.Trace("Setting default Import Directory Table...");
+                var importDescriptorSection = portableExecutable.Sections.First(x => x.Name == ImportDescriptorSection);
+                var reader = portableExecutable.CreateReaderAtRva(importDescriptorSection.Rva);
+                var oldImportDirectoryRVA = reader.ReadUInt32();
+                var oldImportDirectorySize = reader.ReadUInt32();
+                portableExecutable.OptionalHeader.SetDataDirectory(DataDirectoryIndex.ImportDirectory, new DataDirectory(oldImportDirectoryRVA, oldImportDirectorySize));
+                portableExecutable.Sections.Remove(importDescriptorSection);
+            }
+            if (portableExecutable.Sections.Any(x => x.Name == DynamicImportDescriptorSection)) {
+                Log.Trace("Removing the Dynamic Import Descriptor Table...");
+                var dynamicImportDescriptorSection = portableExecutable.Sections.First(x => x.Name == DynamicImportDescriptorSection);
+                portableExecutable.Sections.Remove(dynamicImportDescriptorSection);
+            }
+            if (portableExecutable.Sections.Any(x => x.Name == DynamicLinkDescriptorSection)) {
+                Log.Trace("Removing the Dynamic Link Descriptor Table...");
+                var dynamicLinkDescriptorSection = portableExecutable.Sections.First(x => x.Name == DynamicLinkDescriptorSection);
+                portableExecutable.Sections.Remove(dynamicLinkDescriptorSection);
+            }
+            if (portableExecutable.Sections.Any(x => x.Name == SymbolDescriptorSection)) {
+                Log.Trace("Removing the Symbol Descriptor Table...");
+                var symbolDescriptorSection = portableExecutable.Sections.First(x => x.Name == SymbolDescriptorSection);
+                portableExecutable.Sections.Remove(symbolDescriptorSection);
+            }
+            if (portableExecutable.Sections.Any(x => x.Name == SymbolNameTableSection)) {
+                Log.Trace("Removing the Symbol Name Table...");
+                var symbolNameSection = portableExecutable.Sections.First(x => x.Name == SymbolNameTableSection);
+                portableExecutable.Sections.Remove(symbolNameSection);
+            }
+            if (portableExecutable.Sections.Any(x => x.Name == SymbolPointerSignatureTableSection)) {
+                Log.Trace("Removing the Symbol Pointer Signature Table...");
+                var symbolPointerSignatureSection = portableExecutable.Sections.First(x => x.Name == SymbolPointerSignatureTableSection);
+                portableExecutable.Sections.Remove(symbolPointerSignatureSection);
+            }
         }
 
         private async Task<int> Start(string[] _arguments) {
             var arguments = new ArgumentParser(_arguments);
-            _ = VC.ToolsPath;
             if (arguments.Has("help") || arguments.Empty()) {
                 Log.Trace($"Usage: {FilenameWithoutExtension} [options]");
                 Log.Trace("Argument Syntax:");
@@ -90,15 +136,14 @@ namespace DynamicLinker
                 Log.Trace("  -help | Show this help message");
                 Log.Trace("  -info | Show the informations about DynamicLinker");
                 Log.Trace("  -version [<x[.x.x.x]>] | Target version to search for symbols");
-                Log.Trace("  -machine [<x64,x86_64,x86,i386,amd64>] | The specified architecture, default is this machine architecture");
                 Log.Trace("  -input <file> | The input file to process");
                 Log.Trace("  -output [<directory>] | The output directory to save the processed file, default is current working directory");
-                Log.Trace("  -genlib | Generate libraries from the input files");
-                Log.Trace("  -modlnk | Parse PE file to support dynamic/runtime linking");
-                Log.Trace("  -dlmred | Redirect the Entry Point to support late DllMain call (This will essentially break the module for loaders other than dynalnk)");
+                Log.Trace("  -generatelib [<architecture (x64 or x86)>] | Generate library from the input file");
+                Log.Trace("  -modulepatch <module> [-entryredirect] [-eraseold] | Parse PE file to support dynamic/runtime linking, and optionally redirect the Entry Point to support late DllMain call (This will essentially break the module for loaders other than dynalnk)");
+                Log.Trace("  -moduleunpatch <module> | Removes all the patches did to a PE module");
                 return 0;
             }
-            
+
             if (arguments.Has("info")) {
                 Log.Trace($"DynamicLinker v{Version}");
                 Log.Trace($"DynamicLinker was created by {CreatedBy}");
@@ -124,16 +169,6 @@ namespace DynamicLinker
             }
             Log.Trace($"Output directory: {outputDirectory}");
 
-            string machine = arguments.Get("machine", ArchitectureUtils.GetArchitecture())!;
-            if (!ArchitectureUtils.IsArchitectureValid(machine)) {
-                Log.Error("Invalid architecture specified. Use -help to see the valid options.");
-                return -1;
-            }
-            if (ArchitectureUtils.IsTechnicalName(machine)) {
-                machine = ArchitectureUtils.ConvertToFriendlyNameArch(machine);
-            }
-            Log.Trace($"Architecture: {machine}");
-
             if (!arguments.Has("version") || !Semver.IsValidVersion(arguments.Get("version")!)) {
                 Log.Error("Invalid version specified. Use -help to see the valid options.");
                 return -1;
@@ -141,17 +176,11 @@ namespace DynamicLinker
             Log.Trace("Target version: " + arguments.Get("version")!);
             Semver version = new(arguments.Get("version")!);
 
-            if (VC.ToolsVersion is null) {
+            if (VC.GetToolsVersion() is not string vcToolsVersion) {
                 Log.Error("Visual C++ tools not found.");
                 return -1;
             }
-            Log.Trace("Visual C++ tools version: " + VC.ToolsVersion);
-
-            if (VC.ToolsPath is null) {
-                Log.Error("Visual C++ tools path not found.");
-                return -1;
-            }
-            Log.Trace("Visual C++ tools path: " + VC.ToolsPath);
+            Log.Trace("Visual C++ tools version: " + vcToolsVersion);
 
             DynamicImportModel? model = DynamicImportModel.Parse(await File.ReadAllTextAsync(inputFile));
             if (model is null) {
@@ -159,29 +188,56 @@ namespace DynamicLinker
                 return -1;
             }
 
-            if (arguments.Has("genlib")) {
-                string? export = await GenerateExportDefinition(outputDirectory, machine, model!, version);
+            bool didWork = false;
+            if (arguments.Has("generatelib")) {
+                string arch = arguments.Get("generatelib") is "true" ? ArchitectureUtils.GetArchitecture() : arguments.Get("generatelib")!;
+                Log.Trace($"Architecture: {arch}");
+
+                string? export = await GenerateExportDefinition(outputDirectory, arch, model!, version);
                 if (string.IsNullOrWhiteSpace(export)) {
                     Log.Error($"Failed to generate export definition for {model!.Target}");
                     return -1;
                 }
 
-                string? lib = await GenerateLinkLibrary(export, machine);
+                string? lib = await GenerateLinkLibrary(export, arch);
                 if (string.IsNullOrWhiteSpace(lib)) {
                     Log.Error($"Failed to generate library for {model!.Target}");
                     return -1;
                 }
 
                 Log.Trace($"Generated library for {model!.Target} at {lib}");
-                return 0;
+                didWork = true;
             }
-            else if (arguments.Has("modlnk")) {
-                string inputPortableExecutable = arguments.Get("modlnk")!;
+
+            if (arguments.Has("moduleunpatch")) {
+                string inputPortableExecutable = arguments.Get("moduleunpatch")!;
                 if (string.IsNullOrWhiteSpace(inputPortableExecutable) || !File.Exists(inputPortableExecutable)) {
                     Log.Error("Invalid specified PE filepath.");
                     return -1;
                 }
-                
+                Log.Trace($"Target PE: {inputPortableExecutable}");
+                try {
+                    var portableExecutable = PEFile.FromFile(inputPortableExecutable);
+                    if (portableExecutable is null) {
+                        Log.Error("Failed to parse the specified PE file.");
+                        return -1;
+                    }
+                    
+                }
+                catch (BadImageFormatException) {
+                    Log.Error($"The specified 'moduleunpatch' file was not a PE file.");
+                    return -1;
+                }
+            }
+
+            if (arguments.Has("modulepatch")) {
+                string inputPortableExecutable = arguments.Get("modulepatch")!;
+                if (string.IsNullOrWhiteSpace(inputPortableExecutable) || !File.Exists(inputPortableExecutable)) {
+                    Log.Error("Invalid specified PE filepath.");
+                    return -1;
+                }
+                Log.Trace($"Target PE: {inputPortableExecutable}");
+
                 try {
                     var portableExecutable = PEFile.FromFile(inputPortableExecutable);
                     if (portableExecutable is null) {
@@ -189,8 +245,9 @@ namespace DynamicLinker
                         return -1;
                     }
                     string outputPortableExecutable = Path.Combine(outputDirectory, Path.GetFileName(inputPortableExecutable));
-                    if (arguments.Has("dlmred")) {
-                        if (portableExecutable.Sections.Any(x => x.Name == DllMainRedirectSection)) {
+                    Log.Trace("Starting mod process for dynamic linking...");
+                    if (arguments.Has("entryredirect")) {
+                        if (portableExecutable.Sections.Any(x => x.Name == EntryRedirectSection)) {
                             Log.Warn("The specified PE file already has a DllMain redirect section, no need to redirect it again.");
                         }
                         else {
@@ -203,7 +260,7 @@ namespace DynamicLinker
                                 ..(portableExecutable.OptionalHeader.Magic == OptionalHeaderMagic.PE32Plus ? RedirectionBytes64 : RedirectionBytes32)   // PE32+ ? (8 bytes - off(0x8)) : (6 bytes - off(0x8))
                             ]);
                             var dllMainRedirectSection = new PESection(
-                                DllMainRedirectSection,
+                                EntryRedirectSection,
                                 SectionFlags.MemoryRead | SectionFlags.MemoryExecute
                             ) { Contents = data };
                             portableExecutable.Sections.Add(dllMainRedirectSection);
@@ -211,6 +268,7 @@ namespace DynamicLinker
                             var newEntryPoint = dllMainRedirectSection.Rva + (sizeof(uint) * 2);
                             portableExecutable.OptionalHeader!.AddressOfEntryPoint = newEntryPoint;
                             Log.Trace($"  New Entry Point RVA: 0x{newEntryPoint:x}");
+                            didWork = true;
                         }
                     }
 
@@ -220,85 +278,59 @@ namespace DynamicLinker
                         return -1;
                     }
 
-                    var dynamicLinkSection = portableExecutable.Sections.FirstOrDefault(x => x.Name == DynamicLinkSection);
-                    var importDescriptorTableSection = portableExecutable.Sections.FirstOrDefault(x => x.Name == ImportDescriptorSection);
-                    if (dynamicLinkSection is not null) {
-                        Log.Warn("The specified PE file already has a dynamic linking section, overwriting it.");
-                        var dynamicReader = portableExecutable.CreateReaderAtRva(dynamicLinkSection.Rva);
-                        var importReader = portableExecutable.CreateReaderAtRva(importDirectory.VirtualAddress);
-                        List<ImportDirectoryEntry> existingDynamicImportEntries = [.. ImportDirectoryEntry.GetAllFrom(ref dynamicReader)];
-                        List<ImportDirectoryEntry> importDirectoryEntries = [.. ImportDirectoryEntry.GetAllFrom(ref importReader)];
-                        ImportDirectoryEntry? toBeDynamic = importDirectoryEntries.FirstOrDefault(x => portableExecutable.CreateReaderAtRva(x.Name).ReadUtf8String() == model.Target);
-                        if (toBeDynamic is not null) {
-                            existingDynamicImportEntries.Add(toBeDynamic);
-                            importDirectoryEntries = importDirectoryEntries.Where(x => x.Name != toBeDynamic?.Name).ToList();
-                        }
-                        existingDynamicImportEntries.Add(0u);
-                        importDirectoryEntries.Add(0u);
+                     //|| portableExecutable.Sections.Any(x => {
+                     //    return x.Name is
+                     //        EntryRedirectSection or
+                     //        ImportDescriptorSection or
+                     //        DynamicImportDescriptorSection or
+                     //        DynamicLinkDescriptorSection or
+                     //        SymbolDescriptorSection or
+                     //        SymbolNameTableSection or
+                     //        SymbolPointerSignatureTableSection;
+                     //})
 
-                        var importsDataSegment = new DataSegment(importDirectoryEntries.GetBytesCollection());
-                        if (importDescriptorTableSection is not null) {
-                            importDescriptorTableSection.Contents = importsDataSegment;
-                        }
-                        else {
-                            importDescriptorTableSection = new PESection(
-                                ImportDescriptorSection,
-                                SectionFlags.MemoryRead
-                            ) { Contents = importsDataSegment };
-                            portableExecutable.Sections.Add(importDescriptorTableSection);
-                        }
-                        portableExecutable.AlignSections();
-                        portableExecutable.OptionalHeader.SetDataDirectory(DataDirectoryIndex.ImportDirectory, new DataDirectory(importDescriptorTableSection.Rva, (uint)importsDataSegment.Data.Length));
-
-                        var dynamicImportsDataSegment = new DataSegment(existingDynamicImportEntries.GetBytesCollection());
-                        dynamicLinkSection.Contents = dynamicImportsDataSegment;
-                        portableExecutable.AlignSections();
+                    if (arguments.Has("eraseold")) {
+                        RemoveAllSections(portableExecutable);
+                        didWork = true;
                     }
-                    else {
-                        var importReader = portableExecutable.CreateReaderAtRva(importDirectory.VirtualAddress);
-                        List<ImportDirectoryEntry> existingDynamicImportEntries = [];
-                        List<ImportDirectoryEntry> importDirectoryEntries = [.. ImportDirectoryEntry.GetAllFrom(ref importReader)];
-                        ImportDirectoryEntry? toBeDynamic = importDirectoryEntries.FirstOrDefault(x => portableExecutable.CreateReaderAtRva(x.Name).ReadUtf8String() == model.Target);
-                        if (toBeDynamic is not null) {
-                            existingDynamicImportEntries.Add(toBeDynamic);
-                            importDirectoryEntries = importDirectoryEntries.Where(x => x.Name != toBeDynamic?.Name).ToList();
-                        }
-                        existingDynamicImportEntries.Add(0u);
-                        importDirectoryEntries.Add(0u);
 
-                        var importsDataSegment = new DataSegment(importDirectoryEntries.GetBytesCollection());
-                        if (importDescriptorTableSection is not null) {
-                            importDescriptorTableSection.Contents = importsDataSegment;
+                    // Parse the symbols and create .symsnt and .sympst sections
+                    List<string> symbolNames = [];
+                    List<DynamicSymbolDescriptor> symbolDescriptors = [];
+                    if (portableExecutable.Sections.Any(x => x.Name == SymbolDescriptorSection)) {
+                        var symbolDescriptorSection = portableExecutable.Sections.First(x => x.Name == SymbolDescriptorSection);
+                        var reader = portableExecutable.CreateReaderAtRva(symbolDescriptorSection.Rva);
+                        uint count = reader.ReadUInt32();
+                        for (uint i = 0; i < count; i++) {
+                            symbolDescriptors.Add(DynamicSymbolDescriptor.FromReader(ref reader)!);
                         }
-                        else {
-                            importDescriptorTableSection = new PESection(
-                                ImportDescriptorSection,
-                                SectionFlags.MemoryRead
-                            ) { Contents = importsDataSegment };
-                            portableExecutable.Sections.Add(importDescriptorTableSection);
-                        }
-                        portableExecutable.AlignSections();
-                        portableExecutable.OptionalHeader.SetDataDirectory(DataDirectoryIndex.ImportDirectory, new DataDirectory(importDescriptorTableSection.Rva, (uint)importsDataSegment.Data.Length));
-
-                        var dynamicImportsDataSegment = new DataSegment(existingDynamicImportEntries.GetBytesCollection());
-                        dynamicLinkSection = new PESection(
-                            DynamicLinkSection,
-                            SectionFlags.MemoryRead
-                        ) { Contents = dynamicImportsDataSegment };
-                        portableExecutable.Sections.Add(dynamicLinkSection);
-                        portableExecutable.AlignSections();
                     }
+
+                    Log.Trace($"Creating Symbol Descriptor Table ({SymbolNameTableSection})...");
+
+                    var symbolDescriptorTableDataStream = new MemoryStream();
+                    var symbolDescriptorTableDataWriter = new BinaryStreamWriter(symbolDescriptorTableDataStream);
+                    symbolDescriptorTableDataWriter.WriteUInt32((uint)symbolDescriptors.Count);
+                    foreach (var symbolName in symbolDescriptors) {
+                        symbolDescriptorTableDataWriter.WriteAsciiString(symbolName + '\0');
+                    }
+                    var symbolNameTableSegment = new DataSegment(symbolNameTableDataStream.ToArray());
+                    var symbolNameTableSection = new PESection(SymbolNameTableSection, SectionFlags.MemoryRead | SectionFlags.MemoryWrite) { Contents = symbolNameTableSegment };
+                    portableExecutable.Sections.Add(symbolNameTableSection);
+                    portableExecutable.AlignSections();
+
                     Directory.CreateDirectory(Path.GetDirectoryName(outputPortableExecutable)!);
                     portableExecutable.Write(outputPortableExecutable);
-                    return 0;
+                    didWork = true;
                 }
                 catch (BadImageFormatException) {
-                    Log.Error("The specified 'modlnk' file was not a PE file.");
+                    Log.Error($"The specified 'modulepatch' file was not a PE file.");
                     return -1;
                 }
             }
 
-            Log.Warn("Unknown command. Use -help to see the available commands.");
+            if (!didWork)
+                Log.Warn("Unknown command. Use -help to see the available commands.");
             return 0;
         }
     }

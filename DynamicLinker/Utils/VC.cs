@@ -8,16 +8,6 @@ using System.Threading.Tasks;
 
 namespace DynamicLinker.Utils {
     public static class VC {
-        private static string? toolsVersion;
-        public static string? ToolsVersion {
-            get => toolsVersion ??= GetToolsVersion();
-        }
-
-        private static string? toolsPath;
-        public static string? ToolsPath {
-            get => toolsPath ??= GetToolsPath();
-        }
-
         public static string? GetToolsVersion() {
             string txtPath = $"{Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)}/Microsoft Visual Studio/2022/Community/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt";
             if (!File.Exists(txtPath)) {
@@ -27,8 +17,8 @@ namespace DynamicLinker.Utils {
             return File.ReadAllText(txtPath).Trim();
         }
 
-        public static string? GetToolsPath(string arch = "x64") {
-            if (ToolsVersion is null) {
+        public static string? GetToolsPath(string arch) {
+            if (GetToolsVersion() is not string tools) {
                 return null;
             }
 
@@ -36,12 +26,8 @@ namespace DynamicLinker.Utils {
                 return null;
             }
 
-            if (ArchitectureUtils.IsTechnicalName(arch)) {
-                arch = ArchitectureUtils.ConvertToFriendlyNameArch(arch);
-            }
-
-            string machineFriendlyArch = ArchitectureUtils.ConvertToFriendlyNameArch(ArchitectureUtils.GetArchitecture());
-            string toolsPath = $"{Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)}/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/{ToolsVersion}/bin/Host{machineFriendlyArch}/{arch}";
+            string machineArch = ArchitectureUtils.GetArchitecture();
+            string toolsPath = $"{Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)}/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/{tools}/bin/Host{machineArch}/{arch}";
             if (!Directory.Exists(toolsPath)) {
                 return null;
             }
@@ -49,14 +35,13 @@ namespace DynamicLinker.Utils {
             return toolsPath;
         }
 
-        public static async Task<bool> LibAsync(string arguments) {
-            string? toolsPath = ToolsPath;
-            if (toolsPath is null) {
+        public static async Task<bool> LibAsync(string arguments, string arch) {
+            if (GetToolsPath(arch) is not string tools) {
                 return false;
             }
 
-            ProcessStartInfo psi = new ProcessStartInfo {
-                FileName = $"{toolsPath}/lib.exe",
+            ProcessStartInfo psi = new() {
+                FileName = $"{tools}/lib.exe",
                 Arguments = arguments,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,

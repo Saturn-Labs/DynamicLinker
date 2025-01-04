@@ -33,7 +33,7 @@ namespace DynamicLinker.Models {
                             },
                             ""architecture"": {
                                 ""type"": ""string"",
-                                ""enum"": [""amd64"", ""x64"", ""x86_64"", ""x86"", ""i386""]
+                                ""enum"": [""x64"", ""x86""]
                             },
                             ""symbol"": {
                                 ""type"": ""string""
@@ -60,10 +60,7 @@ namespace DynamicLinker.Models {
                                 ]
                             }
                         },
-                        ""required"": [""symbol"", ""pointer""],
-                        ""default"": {
-                            ""architecture"": ""amd64""
-                        }
+                        ""required"": [""symbol"", ""pointer""]
                     }
                 }
             },
