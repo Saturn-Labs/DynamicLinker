@@ -4,10 +4,11 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace DynamicLinker.Utils {
-    public static class VC {
+    public static partial class VC {
         public static string? GetToolsVersion() {
             string txtPath = $"{Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)}/Microsoft Visual Studio/2022/Community/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt";
             if (!File.Exists(txtPath)) {
@@ -59,5 +60,39 @@ namespace DynamicLinker.Utils {
             await process.WaitForExitAsync();
             return process.ExitCode == 0;
         }
+
+        public static async Task<string?> UndnameAsync(string name, string arch) {
+            if (GetToolsPath(arch) is not string tools) {
+                return null;
+            }
+            ProcessStartInfo psi = new() {
+                FileName = $"{tools}/undname.exe",
+                Arguments = $"\"{name}\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            using Process process = new() {
+                StartInfo = psi
+            };
+
+            process.Start();
+            string? demangled = null;
+            while (!process.HasExited) {
+                string output = await process.StandardOutput.ReadToEndAsync() ?? "";
+                Regex undnameRegex = UndnameRegex();
+                Match match = undnameRegex.Match(output);
+                if (!match.Success) {
+                    return null;
+                }
+                demangled = match.Groups[1].Value;
+            }
+            await process.WaitForExitAsync();
+            return process.ExitCode == 0 ? demangled : null;
+        }
+
+        [GeneratedRegex(@"is :- \""(.*)\""")]
+        public static partial Regex UndnameRegex();
     }
 }

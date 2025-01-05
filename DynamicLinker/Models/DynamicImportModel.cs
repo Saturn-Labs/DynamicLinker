@@ -39,25 +39,8 @@ namespace DynamicLinker.Models {
                                 ""type"": ""string""
                             },
                             ""pointer"": {
-                                ""properties"": {
-                                    ""type"": { ""type"": ""string"", ""enum"": [""offset"", ""pattern""] },
-                                    ""value"": { ""type"": ""string"" }
-                                },
-                       	        ""required"": [""value"", ""type""],
-                                ""oneOf"": [
-                                    {
-                                        ""properties"": {
-                                            ""type"": { ""enum"": [""offset""] },
-                                            ""value"": { ""pattern"": ""^0x[0-9a-fA-F]{1,16}$"" }
-                                        }
-                                    },
-                                    {
-                                        ""properties"": {
-                                            ""type"": { ""enum"": [""pattern""] },
-                                            ""value"": { ""pattern"": ""^([0-9A-Fa-f]{2}|\\?)(( [0-9A-Fa-f]{2}| \\?))*$"" }
-                                        }
-                                    }
-                                ]
+                                ""type"": ""string"",
+                                ""pattern"": ""^(0x[0-9a-fA-F]{1,16}|([0-9A-Fa-f]{2}|\\?)(( [0-9A-Fa-f]{2}| \\?))*)$""
                             }
                         },
                         ""required"": [""symbol"", ""pointer""]
