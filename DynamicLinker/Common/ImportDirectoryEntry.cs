@@ -22,7 +22,7 @@ namespace DynamicLinker.Common {
         }
 
         public static ImportDirectoryEntry? FromReader(ref BinaryStreamReader reader) {
-            if (reader.Rva + sizeof(uint) * 5 > reader.EndRva)
+            if (reader.Rva + Size > reader.EndRva)
                 return null;
 
             return new ImportDirectoryEntry(reader.ReadUInt32(), reader.ReadUInt32(), reader.ReadUInt32(), reader.ReadUInt32(), reader.ReadUInt32());
@@ -95,5 +95,7 @@ namespace DynamicLinker.Common {
             entry.WriteTo(writer);
             return stream.ToArray();
         }
+
+        public static uint Size => sizeof(uint) * 5;
     }
 }
