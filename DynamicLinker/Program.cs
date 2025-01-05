@@ -204,12 +204,17 @@ namespace DynamicLinker {
                 }
                 Log.Trace($"Target PE: {inputPortableExecutable}");
                 try {
+                    string outputPortableExecutable = Path.Combine(outputDirectory, Path.GetFileName(inputPortableExecutable));
                     var portableExecutable = PEFile.FromFile(inputPortableExecutable);
                     if (portableExecutable is null) {
                         Log.Error("Failed to parse the specified PE file.");
                         return -1;
                     }
-                    
+                    RemoveAllSections(portableExecutable);
+                    portableExecutable.AlignSections();
+                    Directory.CreateDirectory(Path.GetDirectoryName(outputPortableExecutable)!);
+                    portableExecutable.Write(outputPortableExecutable);
+                    didWork = true;
                 }
                 catch (BadImageFormatException) {
                     Log.Error($"The specified 'moduleunpatch' file was not a PE file.");
@@ -224,7 +229,6 @@ namespace DynamicLinker {
                     return -1;
                 }
                 Log.Trace($"Target PE: {inputPortableExecutable}");
-
                 try {
                     var portableExecutable = PEFile.FromFile(inputPortableExecutable);
                     if (portableExecutable is null) {
@@ -582,6 +586,7 @@ namespace DynamicLinker {
                         };
                         Log.Trace($"Creating ({DynamicImportDescriptorSection}) section...");
                         portableExecutable.Sections.Add(dynamicImportDirectoryTableSection);
+                        portableExecutable.AlignSections();
                         portableExecutable.OptionalHeader.SetDataDirectory(DataDirectoryIndex.ImportDirectory, new DataDirectory(importDirectoryTableSection.Rva + sizeof(uint) * 2, (uint)dynamicImportDirectoryTableSegment.Data.Length));
                     }
 
