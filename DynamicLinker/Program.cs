@@ -25,7 +25,7 @@ namespace DynamicLinker {
         public const string SymbolIndexerSection = ".symidx";
         public const string SymbolDescriptorSection = ".symsdt";
         public const string SymbolNameTableSection = ".symsnt";
-        public const string SymbolDemangledNameTableSection = ".symsdnt";
+        public const string SymbolDemangledNameTableSection = ".symsdn";
         public const string SymbolPointerSignatureTableSection = ".sympst";
         public const string DynamicLoaderSection = ".dlnkldr";
         public static string Version => Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0.0";
@@ -361,7 +361,7 @@ namespace DynamicLinker {
                         symbolNameTableDataWriter.WriteUInt32(0u);
 
                         var symbolDemangledNameTableDataStream = new MemoryStream();
-                        var symbolDemangledNameTableDataWriter = new BinaryStreamWriter(symbolNameTableDataStream);
+                        var symbolDemangledNameTableDataWriter = new BinaryStreamWriter(symbolDemangledNameTableDataStream);
                         symbolDemangledNameTableDataWriter.WriteUInt32(0u);
 
                         var symbolPointerSignatureTableDataStream = new MemoryStream();
@@ -519,7 +519,6 @@ namespace DynamicLinker {
                             var dynamicImportDirectorySection = portableExecutable.Sections.First(x => x.Name == DynamicImportDescriptorSection);
                             var dynamicImportDirectoryReader = portableExecutable.CreateReaderAtRva(dynamicImportDirectorySection.Rva);
                             dynamicImportDirectoryEntries = [.. ImportDirectoryEntry.GetAllFrom(ref dynamicImportDirectoryReader)];
-                            portableExecutable.Sections.Remove(dynamicImportDirectorySection);
                         }
 
                         Log.Trace("Creating import descriptors on the binary...");
@@ -531,6 +530,9 @@ namespace DynamicLinker {
                             Log.Warn("Failed to find the specified target in the import directory.");
                             goto align_and_finish;
                         }
+
+                        if (portableExecutable.Sections.Any(x => x.Name == DynamicImportDescriptorSection))
+                            portableExecutable.Sections.Remove(portableExecutable.Sections.First(x => x.Name == DynamicImportDescriptorSection));
 
                         dynamicImportDirectoryEntries.Add(dynamicImportDescriptor);
                         importDirectoryEntries = importDirectoryEntries.Where(x => x.Name != dynamicImportDescriptor.Name).ToList();
