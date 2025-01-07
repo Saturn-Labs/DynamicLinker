@@ -26,7 +26,7 @@ public static class ArgumentParser
         Dictionary<string, string> arguments = Parse(args);
         foreach (var prop in typeof(T).GetProperties()) {
             if (arguments.ContainsKey(prop.Name.ToLower())) {
-                prop.SetValue(t, Convert.ChangeType(arguments[prop.Name], prop.PropertyType));
+                prop.SetValue(t, Convert.ChangeType(arguments[prop.Name.ToLower()], prop.PropertyType));
             }
         }
         return t;

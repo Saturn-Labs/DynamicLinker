@@ -584,6 +584,7 @@ namespace DynamicLinker {
                                 Directory.CreateDirectory(Path.GetDirectoryName(outputPortableExecutable)!);
                                 portableExecutable.Write(outputPortableExecutable);
                             }
+                            AlignAndFinish();
                         }
                     }
                     catch (BadImageFormatException) {
