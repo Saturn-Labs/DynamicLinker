@@ -1,68 +1,34 @@
 namespace DynamicLinker.Utils;
 
-public class ArgumentParser
+public static class ArgumentParser
 {
-    private readonly Dictionary<string, string> _arguments = new Dictionary<string, string>();
-
-    public ArgumentParser(string[] args)
+    private static Dictionary<string, string> Parse(string[] args)
     {
-        Parse(args);
-    }
-
-    private void Parse(string[] args)
-    {
-        for (int i = 0; i < args.Length; i++)
-        {
+        Dictionary<string, string> arguments = [];
+        for (int i = 0; i < args.Length; i++) {
             string arg = args[i];
-            if (arg.StartsWith("--"))
-            {
-                var split = arg.Substring(2).Split('=', 2);
-                if (split.Length == 2)
-                {
-                    _arguments[split[0]] = split[1];
+            if (arg.StartsWith('/')) {
+                string kv = arg[1..];
+                string[] parts = kv.Split('=');
+                if (parts.Length == 2) {
+                    arguments[parts[0].ToLower()] = parts[1];
                 }
-                else
-                {
-                    _arguments[split[0]] = "true"; // Handle flags like "--verbose"
-                }
-            }
-            else if (arg.StartsWith("-"))
-            {
-                string key = arg.Substring(1);
-                if (i + 1 < args.Length && !args[i + 1].StartsWith("-"))
-                {
-                    _arguments[key] = args[++i];
-                }
-                else
-                {
-                    _arguments[key] = "true"; // Handle flags like "-v"
+                else {
+                    arguments[kv.ToLower()] = "true";
                 }
             }
         }
+        return arguments;
     }
 
-    public string? Get(string key, string? defaultValue = null)
-    {
-        return _arguments.TryGetValue(key, out string? value) ? value : defaultValue;
-    }
-
-    public bool Has(string key)
-    {
-        return _arguments.ContainsKey(key);
-    }
-
-    public bool IsArray(string key) {
-        return _arguments.TryGetValue(key, out string? value) && value.StartsWith('[') && value.EndsWith(']');
-    }
-
-    public string[] GetArray(string key) {
-        if (!IsArray(key)) {
-            return [];
+    public static T ParseInto<T>(string[] args) where T : new() {
+        T t = new();
+        Dictionary<string, string> arguments = Parse(args);
+        foreach (var prop in typeof(T).GetProperties()) {
+            if (arguments.ContainsKey(prop.Name.ToLower())) {
+                prop.SetValue(t, Convert.ChangeType(arguments[prop.Name], prop.PropertyType));
+            }
         }
-        return _arguments[key].TrimStart('[').TrimEnd(']').Split(',');
-    }
-
-    public bool Empty() {
-        return _arguments.Count == 0;
+        return t;
     }
 }

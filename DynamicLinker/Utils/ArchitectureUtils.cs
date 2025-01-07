@@ -7,11 +7,11 @@ using System.Threading.Tasks;
 namespace DynamicLinker.Utils {
     public static class ArchitectureUtils {
         public static bool IsArchitectureValid(string arch) {
-            return arch == "x64" || arch == "x86";
+            return arch is "x64" or "x86";
         }
 
         public static string GetArchitecture() {
-            return Environment.Is64BitOperatingSystem ? "x86" : "x64";
+            return Environment.Is64BitOperatingSystem ? "x64" : "x86";
         }
     }
 }

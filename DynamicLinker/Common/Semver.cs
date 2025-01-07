@@ -126,5 +126,13 @@ namespace DynamicLinker.Common {
 
         [GeneratedRegex(@"^(\d+|\*)(\.(\d+|\*)(\.(\d+|\*)(\.(\d+|\*))?)?)?$")]
         public static partial Regex VersionRegex();
+
+        public static implicit operator Semver(string version) {
+            return new Semver(version);
+        }
+
+        public static implicit operator string(Semver semver) {
+            return semver.ToString();
+        }
     }
 }
